@@ -1,0 +1,102 @@
+@startuml 예매_시퀀스
+!theme cerulean-outline
+title RailPass - 예매 처리 시퀀스 다이어그램
+
+skinparam backgroundColor #FAFAFA
+skinparam sequence {
+  ActorBackgroundColor #FCE4EC
+  ActorBorderColor #E91E63
+  ParticipantBackgroundColor #E8F4FD
+  ParticipantBorderColor #1565C0
+  LifeLineBorderColor #90CAF9
+  ArrowColor #1565C0
+  BoxBackgroundColor #F3E5F5
+  BoxBorderColor #7B1FA2
+}
+
+actor "사용자" as User
+participant "웹 브라우저\n(Next.js)" as Browser
+participant "백엔드 API\n(FastAPI)" as API
+participant "작업 큐\n(Redis/BullMQ)" as Queue
+participant "예매 워커\n(Python)" as Worker
+participant "SRT/KTX\n웹사이트" as Rail
+database "데이터베이스" as DB
+participant "알림 서비스\n(텔레그램/디스코드)" as Notify
+
+== 사용자 예매 설정 ==
+
+User -> Browser: 예매 조건 입력\n(열차종류, 출/도착역, 날짜, 시간대, 승객)
+Browser -> API: POST /api/reservations\n{rail_type, departure, arrival, dates, times, passengers}
+API -> DB: 예매 작업 저장 (status=pending)
+API -> Queue: 예매 작업 추가
+API --> Browser: 201 Created {job_id}
+Browser --> User: 예매 현황 페이지로 이동\n(실시간 진행 상황 표시)
+
+== 실시간 상태 구독 ==
+
+Browser -> API: WebSocket 연결 / SSE 구독\n/api/reservations/{job_id}/status
+API --> Browser: 연결 확인
+
+== 예매 워커 실행 ==
+
+Queue -> Worker: 작업 소비 (job dequeue)
+Worker -> DB: 작업 정보 및 계정 정보 조회
+Worker -> DB: 작업 상태 업데이트 (status=running)
+API --> Browser: [WebSocket] 상태 업데이트: 실행 중
+
+loop 예매 성공까지 반복 (gamma distribution 간격)
+  Worker -> Rail: 열차 검색 API 요청\n(출발역, 도착역, 날짜, 시간)
+  Rail --> Worker: 열차 목록 반환
+
+  alt 좌석 있음
+    Worker -> Rail: 예매 요청
+    Rail --> Worker: 예매 성공/실패 응답
+
+    alt 예매 성공
+      Worker -> DB: 예매 결과 저장
+      Worker -> DB: 작업 상태 업데이트 (status=success)
+      API --> Browser: [WebSocket] 예매 성공!
+      Browser --> User: 🎉 예매 성공 알림 표시
+
+      opt 자동결제 설정
+        Worker -> Rail: 카드 결제 요청
+        Rail --> Worker: 결제 성공 응답
+        Worker -> DB: 결제 정보 저장
+      end
+
+      Worker -> Notify: 텔레그램/디스코드 알림 발송\n(열차정보, 좌석정보, 예매번호)
+      Notify --> User: 📱 푸시 알림 수신
+
+    else 예매 실패
+      Worker -> Worker: 대기 후 재시도
+    end
+
+  else 좌석 없음
+    Worker -> API: 시도 횟수 및 경과 시간 업데이트
+    API --> Browser: [WebSocket] 대기 중 (N회 시도, HH:MM:SS 경과)
+    Browser --> User: 실시간 카운터 업데이트
+    Worker -> Worker: 대기 (평균 1.25초)
+  end
+end
+
+== 예매 결과 확인 ==
+
+User -> Browser: 예매 내역 확인
+Browser -> API: GET /api/reservations
+API -> DB: 예매 결과 조회
+DB --> API: 예매 목록
+API --> Browser: 예매 목록 반환
+Browser --> User: 예매 내역 표시
+
+opt 미결제 예매 결제
+  User -> Browser: 결제하기 클릭
+  Browser -> API: POST /api/reservations/{id}/pay
+  API -> Worker: 결제 요청
+  Worker -> Rail: 카드 결제
+  Rail --> Worker: 결제 완료
+  Worker --> API: 결제 성공
+  API --> Browser: 결제 완료
+  Browser --> User: 💳 결제 성공
+end
+
+@enduml

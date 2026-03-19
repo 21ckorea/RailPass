@@ -1,0 +1,79 @@
+@startuml 사용자_흐름도
+!theme cerulean-outline
+title RailPass - 사용자 흐름도 (Activity Diagram)
+
+skinparam backgroundColor #FAFAFA
+skinparam activity {
+  BackgroundColor #E3F2FD
+  BorderColor #1565C0
+  DiamondBackgroundColor #FFF9C4
+  DiamondBorderColor #F57F17
+}
+
+start
+
+:브라우저에서 RailPass 접속;
+
+if (로그인 상태?) then (아니오)
+  :회원가입 / 로그인;
+  :이메일 + 비밀번호 입력;
+  :JWT 토큰 발급;
+endif
+
+:대시보드 진입;
+
+fork
+  :사용자 설정;
+  :SRT/KTX 계정 입력\n(암호화하여 서버 저장);
+  :알림 설정\n- 텔레그램 봇 토큰/Chat ID\n- 디스코드 웹훅 URL;
+fork again
+  :예매 시작;
+  :열차 종류 선택\n(SRT / KTX);
+  :출발역 선택;
+  :도착역 선택;
+  :출발 날짜 선택\n(예매가능일 기준 달력);
+  
+  repeat
+    :출발 시각대 추가\n(여러 시간대 복수 선택 가능);
+  repeat while (시간대 추가?) is (예) not (아니오)
+  
+  :승객 정보 입력\n(성인/어린이/경로/장애인);
+  :좌석 유형 선택\n(일반실 우선/특실 우선/일반실만/특실만);
+  :카드 자동결제 여부 선택;
+  
+  :예매 작업 생성 및 큐 등록;
+  
+  :예매 현황 페이지에서\n실시간 진행상황 확인\n(시도 횟수, 경과 시간);
+  
+  repeat
+    :서버에서 열차 조회 실행;
+    if (좌석 있음?) then (예)
+      :예매 시도;
+      if (예매 성공?) then (예)
+        :예매 성공!;
+        if (자동결제 설정?) then (예)
+          :카드 자동결제;
+        endif
+        :결과 DB 저장;
+        :텔레그램/디스코드 알림 발송;
+        :웹 페이지 성공 표시;
+      else (아니오)
+        :재시도;
+      endif
+    else (아니오)
+      :대기 후 재시도\n(1.25초 평균, gamma distribution);
+    endif
+  repeat while (예매 성공 또는 사용자 취소?) is (아니오) not (종료)
+
+end fork
+
+:예매 내역 확인;
+fork
+  :예매 확인/취소;
+fork again
+  :미결제 예매 카드 결제;
+end fork
+
+stop
+
+@enduml

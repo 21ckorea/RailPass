@@ -1,0 +1,125 @@
+@startuml 컴포넌트_구조
+!theme cerulean-outline
+title RailPass - 웹 시스템 컴포넌트 상세 구조
+
+skinparam backgroundColor #FAFAFA
+skinparam component {
+  BackgroundColor #E3F2FD
+  BorderColor #1565C0
+}
+skinparam package {
+  BackgroundColor #FAFAFA
+  BorderColor #78909C
+  FontSize 14
+  FontStyle bold
+}
+
+package "클라이언트 레이어 (Next.js + TypeScript)" {
+  package "페이지" {
+    component "/login" as LoginP
+    component "/dashboard" as DashP
+    component "/reserve" as ResP
+    component "/status/[id]" as StatusP
+    component "/settings" as SetP
+    component "/history" as HistP
+  }
+
+  package "공통 컴포넌트" {
+    component "TrainSelector\n(SRT/KTX 선택)" as TrainSel
+    component "StationPicker\n(역 검색/선택)" as StaPick
+    component "DateTimePicker\n(날짜/시간 선택)" as DTPick
+    component "PassengerForm\n(승객 유형별 수량)" as PaxForm
+    component "SeatTypeSelector\n(좌석 유형 선택)" as SeatSel
+    component "ReservationCard\n(예매 현황 카드)" as ResCard
+    component "NotificationBadge\n(실시간 업데이트)" as NotiB
+  }
+
+  package "상태 관리 (Zustand / React Query)" {
+    component "authStore\n(로그인 상태)" as AuthStore
+    component "reservationStore\n(예매 상태/실시간)" as ResStore
+    component "settingsStore\n(사용자 설정)" as SetStore
+  }
+}
+
+package "API 게이트웨이 레이어 (FastAPI)" {
+  component "POST /auth/login\nPOST /auth/register\nPOST /auth/refresh" as AuthRoute
+  component "GET/PUT /users/settings\nPUT /users/rail-accounts\nPUT /users/notifications\nPUT /users/card" as UserRoute
+  component "POST /reservations\nGET /reservations\nDELETE /reservations/{id}\nPOST /reservations/{id}/pay" as ResRoute
+  component "WS /ws/reservations/{id}\n(WebSocket 실시간 상태)" as WSRoute
+  component "GET /trains/search\n(열차 목록 미리보기)" as TrainRoute
+}
+
+package "비즈니스 로직 레이어" {
+  component "AuthService\n(JWT, 비밀번호 해시)" as AuthSvc
+  component "UserService\n(계정 암호화 저장)" as UserSvc
+  component "ReservationService\n(작업 생성 및 관리)" as ResSvc
+  component "NotificationService\n(텔레그램/디스코드)" as NotiSvc
+  component "WorkerManager\n(워커 생성/종료 관리)" as WkrMgr
+}
+
+package "예매 워커 레이어 (Python)" {
+  component "SRTWorker\n- 로그인\n- 열차 검색\n- 예매/결제\n- 재시도 루프" as SRTWkr
+  component "KTXWorker\n- 로그인\n- 열차 검색\n- 예매/결제\n- 재시도 루프" as KTXWkr
+  component "CardPaymentHandler\n(카드 자동결제)" as CardPay
+  component "GammaScheduler\n(재시도 간격 조절)" as Sched
+}
+
+package "인프라 레이어" {
+  database "PostgreSQL\n(메인 DB)" as PG
+  database "Redis\n(세션/큐/캐시)" as Redis
+  component "BullMQ\n(작업 큐)" as BullQ
+}
+
+cloud "외부 API" {
+  component "SRT API\n(srt.co.kr)" as SRTAPI
+  component "KTX API\n(letskorail.com)" as KTXAPI
+  component "Telegram Bot API" as TgAPI
+  component "Discord Webhook" as DCAPI
+}
+
+' Page connections
+ResP --> TrainSel
+ResP --> StaPick
+ResP --> DTPick
+ResP --> PaxForm
+ResP --> SeatSel
+DashP --> ResCard
+StatusP --> NotiB
+
+' Store connections
+AuthStore --> AuthRoute
+ResStore --> WSRoute
+SetStore --> UserRoute
+
+' API Layer connections
+AuthRoute --> AuthSvc
+UserRoute --> UserSvc
+ResRoute --> ResSvc
+TrainRoute --> ResSvc
+WSRoute --> WkrMgr
+
+' Service connections
+AuthSvc --> PG
+UserSvc --> PG
+ResSvc --> PG
+ResSvc --> BullQ
+WkrMgr --> BullQ
+NotiSvc --> TgAPI
+NotiSvc --> DCAPI
+
+' Worker connections
+BullQ --> SRTWkr
+BullQ --> KTXWkr
+SRTWkr --> SRTAPI
+KTXWkr --> KTXAPI
+SRTWkr --> CardPay
+KTXWkr --> CardPay
+SRTWkr --> Sched
+KTXWkr --> Sched
+SRTWkr --> NotiSvc
+KTXWkr --> NotiSvc
+SRTWkr --> PG
+KTXWkr --> PG
+WkrMgr --> Redis
+
+@enduml

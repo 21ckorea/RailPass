@@ -1,0 +1,102 @@
+@startuml DB_스키마
+!theme cerulean-outline
+title RailPass - 데이터베이스 스키마 (ERD)
+
+skinparam backgroundColor #FAFAFA
+skinparam class {
+  BackgroundColor #E8F4FD
+  BorderColor #1565C0
+  HeaderBackgroundColor #1565C0
+  HeaderFontColor #FFFFFF
+}
+
+entity "users\n(사용자)" as users {
+  * id : UUID <<PK>>
+  --
+  email : VARCHAR(255) UNIQUE
+  password_hash : VARCHAR(255)
+  name : VARCHAR(100)
+  created_at : TIMESTAMP
+  updated_at : TIMESTAMP
+}
+
+entity "rail_accounts\n(SRT/KTX 계정)" as rail_accounts {
+  * id : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  rail_type : ENUM('SRT', 'KTX')
+  account_id : VARCHAR(100) [암호화]
+  account_password : VARCHAR(255) [암호화]
+  is_verified : BOOLEAN
+  created_at : TIMESTAMP
+}
+
+entity "notification_settings\n(알림 설정)" as notification_settings {
+  * id : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  type : ENUM('telegram', 'discord')
+  telegram_token : VARCHAR(255) [암호화]
+  telegram_chat_id : VARCHAR(100)
+  discord_webhook_url : VARCHAR(500) [암호화]
+  is_enabled : BOOLEAN
+  created_at : TIMESTAMP
+}
+
+entity "card_settings\n(카드 설정)" as card_settings {
+  * id : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  card_number : VARCHAR(255) [암호화]
+  card_password : VARCHAR(255) [암호화]
+  birthday : VARCHAR(255) [암호화]
+  expire_date : VARCHAR(255) [암호화]
+  is_enabled : BOOLEAN
+  created_at : TIMESTAMP
+}
+
+entity "reservation_jobs\n(예매 작업)" as reservation_jobs {
+  * id : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  rail_type : ENUM('SRT', 'KTX')
+  departure_station : VARCHAR(50)
+  arrival_station : VARCHAR(50)
+  travel_date : DATE
+  time_slots : JSON [선택한 시간대 배열]
+  seat_type : ENUM('GENERAL_FIRST', 'GENERAL_ONLY', 'SPECIAL_FIRST', 'SPECIAL_ONLY')
+  passengers : JSON [승객 구성]
+  auto_pay : BOOLEAN
+  status : ENUM('pending', 'running', 'success', 'failed', 'cancelled')
+  try_count : INTEGER
+  elapsed_seconds : INTEGER
+  created_at : TIMESTAMP
+  updated_at : TIMESTAMP
+}
+
+entity "reservation_results\n(예매 결과)" as reservation_results {
+  * id : UUID <<PK>>
+  --
+  * job_id : UUID <<FK>>
+  reservation_number : VARCHAR(50)
+  train_id : VARCHAR(50)
+  departure_station : VARCHAR(50)
+  arrival_station : VARCHAR(50)
+  departure_time : TIMESTAMP
+  arrival_time : TIMESTAMP
+  seat_info : JSON
+  total_price : INTEGER
+  is_paid : BOOLEAN
+  payment_info : JSON [결제 정보]
+  raw_response : JSON
+  created_at : TIMESTAMP
+}
+
+' Relationships
+users ||--o{ rail_accounts : "보유"
+users ||--o{ notification_settings : "설정"
+users ||--o{ card_settings : "설정"
+users ||--o{ reservation_jobs : "생성"
+reservation_jobs ||--o| reservation_results : "결과"
+
+@enduml

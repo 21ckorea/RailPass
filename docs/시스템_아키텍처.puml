@@ -1,0 +1,109 @@
+@startuml 시스템_아키텍처
+!theme cerulean-outline
+title RailPass - 기차표 자동 예매 웹 시스템 아키텍처
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FAFAFA
+skinparam component {
+  BackgroundColor #E8F4FD
+  BorderColor #2196F3
+  FontSize 13
+}
+skinparam database {
+  BackgroundColor #FFF9E6
+  BorderColor #FF9800
+}
+skinparam cloud {
+  BackgroundColor #E8F5E9
+  BorderColor #4CAF50
+}
+skinparam actor {
+  BackgroundColor #FCE4EC
+  BorderColor #E91E63
+}
+
+actor "사용자\n(다양한 디바이스)" as User
+
+package "프론트엔드 (Next.js)" {
+  component "로그인/회원가입 페이지" as LoginPage
+  component "대시보드" as Dashboard
+  component "예매 설정 페이지" as ReservePage
+  component "예매 현황 페이지" as StatusPage
+  component "사용자 설정 페이지" as SettingsPage
+}
+
+package "백엔드 API (FastAPI / Node.js)" {
+  component "인증 API\n(JWT)" as AuthAPI
+  component "사용자 설정 API\n(계정, 알림 설정)" as UserAPI
+  component "예매 관리 API\n(생성, 조회, 취소)" as ReserveAPI
+  component "예매 워커 컨트롤러\n(작업 큐 관리)" as WorkerController
+}
+
+package "예매 워커 (Python)" {
+  component "SRT 예매 워커\n(srt.py 기반)" as SRTWorker
+  component "KTX 예매 워커\n(ktx.py 기반)" as KTXWorker
+  component "예매 재시도 루프\n(gamma distribution 간격)" as RetryLoop
+}
+
+database "데이터베이스\n(PostgreSQL / SQLite)" as DB {
+  component "사용자 정보" as UserTable
+  component "SRT/KTX 계정 정보\n(암호화 저장)" as AccountTable
+  component "예매 작업 정보" as JobTable
+  component "예매 결과 이력" as ResultTable
+}
+
+database "작업 큐\n(Redis / Bull MQ)" as Queue
+
+cloud "외부 서비스" {
+  component "SRT 웹사이트\n(srt.co.kr)" as SRTSite
+  component "KTX 웹사이트\n(letskorail.com)" as KTXSite
+  component "디스코드 웹훅" as Discord
+  component "텔레그램 봇 API" as Telegram
+}
+
+' 사용자 → 프론트엔드
+User --> LoginPage : 접속
+User --> Dashboard : 대시보드 확인
+User --> ReservePage : 예매 조건 설정
+User --> SettingsPage : 계정/알림 설정
+
+' 프론트엔드 → 백엔드 API
+LoginPage --> AuthAPI : 로그인/회원가입
+Dashboard --> ReserveAPI : 예매 상태 조회
+ReservePage --> ReserveAPI : 예매 작업 생성
+StatusPage --> ReserveAPI : 실시간 상태 조회 (WebSocket/SSE)
+SettingsPage --> UserAPI : 설정 저장
+
+' 백엔드 API ↔ DB
+AuthAPI --> UserTable : 사용자 관리
+UserAPI --> AccountTable : 계정 정보 암호화 저장
+UserAPI --> DB : 알림 설정 저장
+ReserveAPI --> JobTable : 작업 생성/조회
+ReserveAPI --> ResultTable : 결과 저장
+
+' 백엔드 API → 큐
+ReserveAPI --> Queue : 예매 작업 추가
+WorkerController --> Queue : 작업 소비
+
+' 워커 컨트롤러 → 워커
+WorkerController --> SRTWorker : SRT 예매 실행
+WorkerController --> KTXWorker : KTX 예매 실행
+SRTWorker --> RetryLoop : 재시도 로직 공유
+KTXWorker --> RetryLoop : 재시도 로직 공유
+
+' 워커 → 외부 사이트
+SRTWorker --> SRTSite : 열차 조회/예매 API
+KTXWorker --> KTXSite : 열차 조회/예매 API
+
+' 워커 → 결과 저장 및 알림
+SRTWorker --> ResultTable : 예매 결과 저장
+KTXWorker --> ResultTable : 예매 결과 저장
+SRTWorker --> Discord : 예매 성공 알림
+SRTWorker --> Telegram : 예매 성공 알림
+KTXWorker --> Discord : 예매 성공 알림
+KTXWorker --> Telegram : 예매 성공 알림
+
+' 백엔드 → 상태 업데이트
+WorkerController --> StatusPage : 실시간 상태 푸시\n(WebSocket / SSE)
+
+@enduml
