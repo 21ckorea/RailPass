@@ -40,6 +40,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: railpass_backend
+    ports:
+    - "8000:8000"
     restart: unless-stopped
     env_file: .env
     environment:
