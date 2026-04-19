@@ -22,10 +22,16 @@ def run_srt_reservation():
     parser.add_argument("--times", default="", help="타켓 열차 시간 (HHMM, 여러개는 쉼표 구분)")
     parser.add_argument("--seat", default="1", choices=["1", "2", "3", "4"], 
                         help="좌석 옵션 (1:일반우선, 2:일반전용, 3:특실우선, 4:특실전용)")
-    parser.add_argument("--adult", type=int, default=1, help="성인 인원수")
+    parser.add_argument("--adult", type=int, default=0, help="성인 인원수 (다른 승객 설정이 없으면 기본 1명)")
     parser.add_argument("--senior", type=int, default=0, help="경로 인원수")
 
     args = parser.parse_args()
+
+    # 인원수 기본값 처리: 아무것도 입력하지 않았을 때만 성인 1명
+    adult_count = args.adult
+    senior_count = args.senior
+    if adult_count == 0 and senior_count == 0:
+        adult_count = 1
 
     # 좌석 옵션 매핑
     seat_map = {
@@ -45,10 +51,10 @@ def run_srt_reservation():
     
     # 2. 인원 설정
     passengers = []
-    if args.adult > 0:
-        passengers.append(Adult(args.adult))
-    if args.senior > 0:
-        passengers.append(Senior(args.senior))
+    if adult_count > 0:
+        passengers.append(Adult(adult_count))
+    if senior_count > 0:
+        passengers.append(Senior(senior_count))
     
     if not passengers:
         print("인원수가 0명일 수 없습니다.")
