@@ -3,7 +3,7 @@ import os
 import time
 from datetime import datetime
 
-# srtgo 라이브러리 경로 추가 (필요한 경우)
+# srtgo 라이브러리 경로 추가
 sys.path.append(os.path.join(os.getcwd(), 'python'))
 
 from srtgo.srt import SRT, Adult, Senior, SeatType
@@ -19,12 +19,12 @@ def run_srt_reservation():
     parser.add_argument("--dep", default="수서", help="출발역 (기본값: 수서)")
     parser.add_argument("--arr", default="동대구", help="도착역 (기본값: 동대구)")
     parser.add_argument("--date", default=datetime.now().strftime("%Y%m%d"), help="출발 날짜 (YYYYMMDD)")
-    parser.add_argument("--times", help="선택할 열차 시간들 (쉼표 구분, 예: 1400,1530)")
+    parser.add_argument("--times", default="", help="타켓 열차 시간 (HHMM, 여러개는 쉼표 구분)")
     parser.add_argument("--seat", default="1", choices=["1", "2", "3", "4"], 
-                        help="좌석 유형 (1: 일반실 우선, 2: 일반실만, 3: 특실 우선, 4: 특실만)")
+                        help="좌석 옵션 (1:일반우선, 2:일반전용, 3:특실우선, 4:특실전용)")
     parser.add_argument("--adult", type=int, default=1, help="성인 인원수")
     parser.add_argument("--senior", type=int, default=0, help="경로 인원수")
-    
+
     args = parser.parse_args()
 
     # 좌석 옵션 매핑
@@ -56,67 +56,80 @@ def run_srt_reservation():
 
     # 3. 열차 조회 및 필터링
     dep, arr, date = args.dep, args.arr, args.date
-    target_times = args.times.split(",") if args.times else []
+    target_times = [t.strip() for t in args.times.split(",")] if args.times else []
     
-    print(f"\n[ {dep} -> {arr} ] {date} 검색 시작...")
+    # 시간대 설정을 위해 가장 이른 시간 추출 (조회 시작 시간으로 사용)
+    start_time = "000000"
+    if target_times:
+        start_time = sorted(target_times)[0].ljust(6, '0')
     
-    try:
-        # 특정 시간이 지정된 경우 해당 시간들만 필터링하기 위해 전체 조회
-        all_trains = srt.search_train(dep, arr, date, time="000000", available_only=False)
-        
-        if target_times:
-            # 4자리(HHMM) 입력을 처리하기 위해 앞의 4자리만 비교
-            selected_trains = [t for t in all_trains if t.dep_time[:4] in target_times]
-            if not selected_trains:
-                print(f"지정하신 시간({args.times})에 해당하는 열차를 찾을 수 없습니다.")
-                return
-        else:
-            # 시간이 지정되지 않은 경우 인터렉티브 선택 유지
-            print("\n=== 조회된 열차 목록 ===")
-            for i, train in enumerate(all_trains):
-                print(f"[{i}] {train}")
-            selection = input("\n예약을 시도할 열차 번호를 입력하세요 (쉼표로 구분) 또는 Enter(전체): ")
-            if not selection.strip():
-                selected_trains = all_trains
-            else:
-                indices = [int(idx.strip()) for idx in selection.split(",")]
-                selected_trains = [all_trains[i] for i in indices]
-            
-        print(f"\n총 {len(selected_trains)}개의 열차를 모니터링합니다.")
-        for t in selected_trains:
-            print(f" - {t.train_name} {t.train_number} ({t.dep_time[:2]}:{t.dep_time[2:4]})")
-            
-    except Exception as e:
-        print(f"조회 중 오류 발생: {e}")
-        return
-
-    # 4. 예매 시도 루프
     i_try = 0
-    selected_nos = [t.train_number for t in selected_trains]
-    
-    while True:
+    while i_try < 10000:
+        i_try += 1
         try:
-            i_try += 1
-            current_trains = srt.search_train(dep, arr, date, time="000000", available_only=False)
+            # 조회 시 인원 정보를 명시적으로 전달하여 정확한 잔여석 확인
+            current_trains = srt.search_train(dep, arr, date, time=start_time, available_only=False, passengers=passengers)
             
-            for train in current_trains:
-                if train.train_number in selected_nos:
-                    # 좌석 가용성 체크 (옵션에 따라)
-                    is_available = False
-                    if selected_seat_option == SeatType.GENERAL_FIRST:
-                        is_available = train.general_seat_available() or train.special_seat_available()
-                    elif selected_seat_option == SeatType.GENERAL_ONLY:
-                        is_available = train.general_seat_available()
-                    elif selected_seat_option == SeatType.SPECIAL_FIRST:
-                        is_available = train.special_seat_available() or train.general_seat_available()
-                    elif selected_seat_option == SeatType.SPECIAL_ONLY:
-                        is_available = train.special_seat_available()
+            # 타겟 시간대가 있으면 필터링, 없으면 전체 목록 사용
+            available_trains = []
+            if target_times:
+                available_trains = [t for t in current_trains if any(t.dep_time.startswith(time_target) for time_target in target_times)]
+            else:
+                available_trains = current_trains
 
-                    if is_available:
-                        print(f"\n[{train.train_number}] 잔여석 발견! 예약 시도 중...")
-                        reservation = srt.reserve(train, passengers=passengers, option=selected_seat_option)
-                        print(f"🎉 예약 성공! 예약 번호: {reservation.reservation_number}")
-                        return
+            if not available_trains:
+                if target_times:
+                    print(f"\r{date} {dep}->{arr} ({','.join(target_times)}) 열차를 찾을 수 없습니다. (시도: {i_try})", end="", flush=True)
+                else:
+                    print(f"\r{date} {dep}->{arr} 열차를 찾을 수 없습니다. (시도: {i_try})", end="", flush=True)
+                time.sleep(1.2)
+                continue
+
+            for train in available_trains:
+                # 잔여석 확인
+                is_available = False
+                if selected_seat_option in [SeatType.GENERAL_ONLY, SeatType.GENERAL_FIRST]:
+                    if train.general_seat_available():
+                        is_available = True
+                
+                if not is_available and selected_seat_option in [SeatType.SPECIAL_ONLY, SeatType.SPECIAL_FIRST]:
+                    if train.special_seat_available():
+                        is_available = True
+                
+                # '일반우선'인데 일반실이 없으면 특실 확인
+                if not is_available and selected_seat_option == SeatType.GENERAL_FIRST:
+                    if train.special_seat_available():
+                        is_available = True
+                        
+                if is_available:
+                    print(f"\n[{train.train_number}] 잔여석 발견! 예약 시도 중...")
+                    reservation = srt.reserve(train, passengers=passengers, option=selected_seat_option)
+                    
+                    # 상세 정보 출력
+                    print(f"\n" + "="*50)
+                    print(f"🎫 🎉 예매 성공! 🎉 🎫")
+                    print(f"정상적으로 예약이 완료되었습니다. 앱에서 확인해 주세요.")
+                    print("-" * 50)
+                    print(f"• 예약 번호  : {reservation.reservation_number}")
+                    print(f"• 열차 정보  : {reservation.train_name} {reservation.train_number}")
+                    print(f"• 구간 정보  : {reservation.dep_station_name} ({reservation.dep_time[:2]}:{reservation.dep_time[2:4]}) -> "
+                          f"{reservation.arr_station_name} ({reservation.arr_time[:2]}:{reservation.arr_time[2:4]})")
+                    print(f"• 인원 정보  : {reservation.seat_count}명")
+                    
+                    if reservation.tickets:
+                        print(f"• 좌석 정보  : ")
+                        for t in reservation.tickets:
+                            # 좌석 번호와 함께 승객 유형(어른, 경로 등)을 함께 출력
+                            print(f"  - {t.car}호차 {t.seat} ({t.seat_type}/{t.passenger_type})")
+                            
+                    if not reservation.paid and not reservation.is_waiting:
+                        print(f"• 결제 기한  : {reservation.payment_date[4:6]}월 {reservation.payment_date[6:8]}일 "
+                              f"{reservation.payment_time[:2]}:{reservation.payment_time[2:4]} 까지")
+                    elif reservation.is_waiting:
+                        print(f"• 상태 정보  : 예약 대기 (자리가 나면 자동으로 예약됩니다)")
+                        
+                    print("="*50 + "\n")
+                    return
             
             print(f"\r모니터링 중... (시도: {i_try})", end="", flush=True)
             time.sleep(1.2)

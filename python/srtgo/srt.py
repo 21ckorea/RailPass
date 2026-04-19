@@ -201,6 +201,11 @@ class Passenger(metaclass=abc.ABCMeta):
             data[f"psgTpCd{i}"] = passenger.type_code
             data[f"psgInfoPerPrnb{i}"] = str(passenger.count)
 
+        # 첫 번째 승객 유형을 기본값으로 설정 (일부 API 호환성)
+        if combined_passengers:
+            data["psgTpCd"] = combined_passengers[0].type_code
+            data["psgInfoPerPrnb"] = str(combined_passengers[0].count)
+
         return data
 
 
