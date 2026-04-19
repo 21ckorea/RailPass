@@ -281,10 +281,10 @@ def run_reservation(r: redis.Redis, job_data: dict):
     # 로그인
     if is_srt:
         from srtgo.srt import SRT, SRTError, SRTNetFunnelError
-        rail = SRT(account_id, account_pass)
+        rail = SRT(account_id, account_pass, verbose=True)
     else:
         from srtgo.ktx import Korail, KorailError
-        rail = Korail(account_id, account_pass)
+        rail = Korail(account_id, account_pass, verbose=True)
 
     # DB 상태 업데이트
     _update_job_db(job_id, "RUNNING", 0, 0)

@@ -13,6 +13,8 @@ try:
 except ImportError:
     import requests
     HAS_CURL_CFFI = False
+import hashlib
+import os
 import itertools
 import json
 import re
@@ -27,11 +29,13 @@ from functools import reduce
 EMAIL_REGEX = re.compile(r"[^@]+@[^@]+\.[^@]+")
 PHONE_NUMBER_REGEX = re.compile(r"(\d{3})-(\d{3,4})-(\d{4})")
 
-USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 14; SM-S912N Build/UP1A.231005.007)"
+USER_AGENT = "KorailTalk/6.4.4 (iPhone; iOS 17.4.1; Scale/3.00)"
 
 DEFAULT_HEADERS = {
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "User-Agent": USER_AGENT,
+    "Accept": "*/*",
+    "Accept-Language": "ko-KR",
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "Host": "smart.letskorail.com",
     "Connection": "Keep-Alive",
     "Accept-Encoding": "gzip",
@@ -509,18 +513,18 @@ class Korail:
     """Main Korail API interface"""
 
     def __init__(self, korail_id, korail_pw, auto_login=True, verbose=False):
-        if HAS_CURL_CFFI:
-            self._session = curl_cffi.Session(impersonate="chrome")
-        else:
-            self._session = requests.session()
+        self.verbose = verbose
+        self._log(f"Using requests (curl_cffi disabled)")
+        self._session = requests.session()
         self._session.headers.update(DEFAULT_HEADERS)
-        self._device = "AD"
-        self._version = "260309001"
+        self._device = "IP"
+        self._version = "6.4.4"
         self._key = "korail1234567890"
         self._idx = None
+        import uuid
+        self._guid = str(uuid.uuid4()).upper()
         self.korail_id = korail_id
         self.korail_pw = korail_pw
-        self.verbose = verbose
         self.logined = False
         self.membership_number = None
         self.name = None
@@ -539,6 +543,7 @@ class Korail:
         r = self._session.post(url, data=data)
         j = json.loads(r.text)
 
+        self._log(f"Password encryption key fetched: {j.get('app.login.cphd', {}).get('idx')}")
         if j["strResult"] == "SUCC" and j.get("app.login.cphd"):
             self._idx = j["app.login.cphd"]["idx"]
             key = j["app.login.cphd"]["key"]
@@ -549,6 +554,7 @@ class Korail:
             return base64.b64encode(
                 base64.b64encode(cipher.encrypt(padded_data))
             ).decode("utf-8")
+        self._log(f"Failed to fetch encryption key: {r.text}")
         return False
 
     def login(self, korail_id=None, korail_pw=None):
@@ -565,18 +571,24 @@ class Korail:
             else "2"
         )
 
-        data = {
-            "Device": self._device,
-            "Version": self._version,
-            "Key": self._key,
-            "txtMemberNo": self.korail_id,
-            "txtPwd": self.__enc_password(self.korail_pw),
-            "txtInputFlg": txt_input_flg,
-            "idx": self._idx,
-        }
+        data = [
+            ("Device", self._device),
+            ("Version", self._version),
+            ("txtUserType", "1"),
+            ("txtLoginId", self.korail_id),
+            ("txtLoginPw", self.__enc_password(self.korail_pw)),
+            ("txtPassword2", ""),
+            ("txtMobileNo", ""),
+            ("txtEmail", ""),
+            ("txtInputFlg", txt_input_flg),
+            ("Guid", self._guid),
+        ]
 
+        params = "&".join([f"{k}={v}" for k, v in data])
+        self._log(f"KTX Login Request: {API_ENDPOINTS['login']}?{params.replace(data[4][1], '********')}")
         r = self._session.post(API_ENDPOINTS["login"], data=data)
-        self._log(r.text)
+        self._log(f"KTX Login Response Status: {r.status_code}")
+        self._log(f"KTX Login Response Body: {r.text}")
         j = json.loads(r.text)
 
         if j["strResult"] == "SUCC" and j.get("strMbCrdNo"):
@@ -642,35 +654,42 @@ class Korail:
             ),
         }
 
-        data = {
-            "Device": self._device,
-            "Version": self._version,
-            "Sid": "",
-            "txtMenuId": "11",
-            "radJobId": "1",
-            "selGoTrain": train_type,
-            "txtTrnGpCd": train_type,
-            "txtGoStart": dep,
-            "txtGoEnd": arr,
-            "txtGoAbrdDt": date,
-            "txtGoHour": time,
-            "txtPsgFlg_1": counts["adult"],
-            "txtPsgFlg_2": counts["child"] + counts["toddler"],
-            "txtPsgFlg_3": counts["senior"],
-            "txtPsgFlg_4": counts["disability1to3"],
-            "txtPsgFlg_5": counts["disability4to6"],
-            "txtSeatAttCd_2": "000",
-            "txtSeatAttCd_3": "000",
-            "txtSeatAttCd_4": "015",
-            "ebizCrossCheck": "N",
-            "srtCheckYn": "N",  # SRT 함께 보기
-            "rtYn": "N",  # 왕복
-            "adjStnScdlOfrFlg": "N",  # 인접역 보기
-            "mbCrdNo": self.membership_number,
-        }
+        sid = self._session.cookies.get("JSESSIONID", "")
+        data = [
+            ("Device", self._device),
+            ("Version", self._version),
+        ]
+        if sid:
+            data.append(("Sid", sid))
+        
+        data.extend([
+            ("txtMenuId", "11"),
+            ("radJobId", "1"),
+            ("selGoTrain", train_type),
+            ("txtTrnGpCd", train_type),
+            ("txtGoStart", dep),
+            ("txtGoEnd", arr),
+            ("txtGoAbrdDt", date),
+            ("txtGoHour", time),
+            ("txtPsgFlg_1", counts["adult"]),
+            ("txtPsgFlg_2", counts["child"] + counts["toddler"]),
+            ("txtPsgFlg_3", counts["senior"]),
+            ("txtPsgFlg_4", counts["disability1to3"]),
+            ("txtPsgFlg_5", counts["disability4to6"]),
+            ("txtSeatAttCd_2", "000"),
+            ("txtSeatAttCd_3", "000"),
+            ("txtSeatAttCd_4", "015"),
+            ("ebizCrossCheck", "N"),
+            ("srtCheckYn", "N"),
+            ("rtYn", "N"),
+            ("adjStnScdlOfrFlg", "N"),
+            ("mbCrdNo", self.membership_number if self.membership_number else ""),
+            ("Guid", self._guid),
+        ])
 
-        self._log(f"KTX Search Request: {API_ENDPOINTS['search_schedule']}?{data}")
-        r = self._session.get(API_ENDPOINTS["search_schedule"], params=data)
+        params = "&".join([f"{k}={v}" for k, v in data])
+        self._log(f"KTX Search Request: {API_ENDPOINTS['search_schedule']}?{params}")
+        r = self._session.post(API_ENDPOINTS["search_schedule"], data=data)
         self._log(f"KTX Search Response Status: {r.status_code}")
         self._log(f"KTX Search Response Body: {r.text}")
         j = json.loads(r.text)
